@@ -6,6 +6,7 @@ from shapely.geometry import Polygon, Point
 from shapely.ops import nearest_points
 from geopy import distance
 
+# Строим список по широте и долготе каждого внешнего километра МКАД
 mkad_coords = [(55.774558, 37.842762), (55.76522, 37.842789), (55.755723, 37.842627), (55.747399, 37.841828),
                (55.739103, 37.841217), (55.730482, 37.840175), (55.721939, 37.83916), (55.712203, 37.837121),
                (55.703048, 37.83262), (55.694287, 37.829512), (55.68529, 37.831353), (55.675945, 37.834605),
@@ -34,23 +35,23 @@ mkad_coords = [(55.774558, 37.842762), (55.76522, 37.842789), (55.755723, 37.842
                (55.844167, 37.800586), (55.832707, 37.822819), (55.828789, 37.829754), (55.821072, 37.837148),
                (55.811599, 37.838926), (55.802781, 37.840004), (55.793991, 37.840965), (55.785017, 37.841576)]
 
+# Составляем полигон из внешних точек МКАДа с помощью shapely
 mkad_area = Polygon(mkad_coords)
-
-
-def nearest_checking(p):
-    p1, p2 = nearest_points(p, mkad_area)
-    p_mkad = tuple(p2.coords)
-    return p_mkad
 
 
 @geo_blueprint.route('/coordinates', methods=['POST'])
 def geo_calc():
+    # Получаем запрос и забираем адрес
     data = request.json
     address = data.get('check_address')
+    # Проверка верности запроса
     if not address:
-        return 'Уточните адрес', 500
-    params = {'apikey': 'ваш_apikey', 'geocode': address, 'format': 'json'}
+        return 'Требуется запрос формата {"check_address": "Город, улица/проспект/итд, дом"}', 500
+    # Задаем параметры и отправляем запрос yandex api
+    params = {'apikey': 'ваш apikey', 'geocode': address, 'format': 'json'}
     api_request = requests.get('https://geocode-maps.yandex.ru/1.x', params)
+    # Получаем ответ в виде текста, находим координаты объекта запроса и приводим их в нужные нам данные - кортеж из
+    # широты и долготы
     coords_json = json.loads(api_request.text)
     coords = coords_json['response']['GeoObjectCollection']['featureMember'][0]
     coords = coords['GeoObject']['Point']['pos']
@@ -58,9 +59,18 @@ def geo_calc():
     latitude = float(coords[1])
     longitude = float(coords[0])
     coords_tup = (latitude, longitude)
+    # Приводим координаты адреса запроса к классу Point для дальнейших проверок и вычислений с помощью shapely
     p = Point(coords_tup)
+    # Проверяем, находится ли данный адрес внутри МКАД
     if mkad_area.contains(p):
         return 'Искомый адрес находится внутри МКАД'
-    result = float(distance.distance(coords_tup, nearest_checking(p)).km)
+    # С помощью nearest_points, сравниваем нашу точку и все точки полигона МКАД, на выходе получаем координаты адреса
+    # запроса и искомую ближайшую к нему точку полигона
+    p1, p2 = nearest_points(p, mkad_area)
+    # Приводим ближайшую точку в кортеж из широты и долготы
+    p_mkad = tuple(p2.coords)
+    # С помощью geopy делаем рассчет дистанции между адресом запроса и ближайшей к нему внешней точки МКАДа
+    # в километрах, округляем до удобной читаемости и отправляем результат
+    result = float(distance.distance(coords_tup, p_mkad).km)
     result = round(result, 3)
     return 'Расстояние от МКАД до данного адреса ~ ' + str(result) + ' километров'
